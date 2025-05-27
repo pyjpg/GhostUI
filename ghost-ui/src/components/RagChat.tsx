@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import ReactMarkdown from "react-markdown";
 
 type RagResponse = {
   answer: string;
@@ -12,7 +13,9 @@ type Message = {
   text: string;
   hallucinated?: boolean;
   source?: string;
+  error?: boolean;
 };
+
 const RagChat: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -20,36 +23,39 @@ const RagChat: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const queryRAG = async (question: string): Promise<RagResponse> => {
-  try {
-    const response = await fetch('http://127.0.0.1:8000/rag', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ question }),
-    });
+    try {
+      const response = await fetch("http://127.0.0.1:8000/rag", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ question }),
+      });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      return {
+        answer: data.answer,
+        source: data.source,
+        hallucinated: data.hallucinated,
+      };
+    } catch (error) {
+      console.error("Error querying RAG:", error);
+      throw new Error(
+        `Failed to query RAG: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
     }
-
-    const data = await response.json();
-    
-    // Handle case where API returns an error field
-    if (data.error) {
-      throw new Error(data.error);
-    }
-
-    return {
-      answer: data.answer,
-      source: data.source,
-      hallucinated: data.hallucinated,
-    };
-  } catch (error) {
-    console.error('Error querying RAG:', error);
-    throw new Error(`Failed to query RAG: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
-};
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -69,7 +75,7 @@ const RagChat: React.FC = () => {
 
     try {
       const data = await queryRAG(userMessage);
-      
+
       setMessages((prev) => [
         ...prev,
         {
@@ -83,8 +89,8 @@ const RagChat: React.FC = () => {
     } catch (error: any) {
       setMessages((prev) => [
         ...prev,
-        { 
-          sender: "bot", 
+        {
+          sender: "bot",
           text: `Error: ${error.message}`,
           error: true,
         },
@@ -101,19 +107,24 @@ const RagChat: React.FC = () => {
     }
   };
 
-return (
-    <div className="flex flex-col h-96">
-      <div className="flex-1 overflow-y-auto mb-4 space-y-3 px-2 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
+  return (
+    <div className="flex flex-col max-h-[calc(100vh-100px)] h-full">
+      <div className="flex-1 overflow-y-auto mb-4 space-y-3 px-2 pb-24 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
         {messages.length === 0 && (
           <div className="text-center py-12">
             <div className="text-gray-400 text-lg mb-2">💬</div>
-            <p className="text-gray-500 dark:text-gray-400">Ask me anything about the saved pages!</p>
+            <p className="text-gray-500 dark:text-gray-400">
+              Ask me anything about the saved pages!
+            </p>
           </div>
         )}
+
         {messages.map((msg, idx) => (
           <div
             key={idx}
-            className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
+            className={`flex transition-all duration-300 ease-in-out ${
+              msg.sender === "user" ? "justify-end" : "justify-start"
+            }`}
           >
             <div
               className={`max-w-[80%] px-4 py-3 rounded-2xl shadow-sm ${
@@ -124,36 +135,60 @@ return (
                   : "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-bl-md"
               }`}
             >
-              <div className="whitespace-pre-wrap">{msg.text}</div>
+              <div className="prose dark:prose-invert max-w-none text-sm text-left">
+                <ReactMarkdown
+                  components={{
+                    ul: ({ children }) => (
+                      <ul className="list-none space-y-1">{children}</ul>
+                    ),
+                    li: ({ children }) => (
+                      <li className="flex items-start">{children}</li>
+                    ),
+                  }}
+                >
+                  {msg.text}
+                </ReactMarkdown>
+              </div>
 
               {msg.hallucinated && !msg.error && (
-                <div className="mt-2 text-xs text-amber-800 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-200 p-2 rounded-lg border border-amber-200 dark:border-amber-800">
+                <div className="mt-2 inline-flex items-center text-xs font-medium text-amber-800 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-200 px-3 py-1 rounded-full border border-amber-200 dark:border-amber-800">
                   ⚠️ This answer is a fallback and may not be accurate.
                 </div>
               )}
 
               {msg.source && !msg.error && (
                 <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 opacity-70">
-                  Source: {msg.source.replace(/_/g, ' ')}
+                  Source: {msg.source.replace(/_/g, " ")}
                 </div>
               )}
             </div>
           </div>
         ))}
+
         {loading && (
           <div className="flex justify-start">
             <div className="bg-gray-100 dark:bg-gray-800 px-4 py-3 rounded-2xl rounded-bl-md">
               <div className="flex items-center space-x-2">
                 <div className="animate-pulse flex space-x-1">
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                  <div
+                    className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                    style={{ animationDelay: "0s" }}
+                  />
+                  <div
+                    className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                    style={{ animationDelay: "0.15s" }}
+                  />
+                  <div
+                    className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                    style={{ animationDelay: "0.3s" }}
+                  />
                 </div>
                 <span className="text-sm text-gray-500">Thinking...</span>
               </div>
             </div>
           </div>
         )}
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -177,14 +212,24 @@ return (
                 : "text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
             }`}
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+              />
             </svg>
           </button>
         </div>
       </div>
     </div>
   );
-}; 
+};
 
 export default RagChat;
