@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
 type RagResponse = {
   answer: string;
@@ -13,66 +13,85 @@ type Message = {
   hallucinated?: boolean;
   source?: string;
 };
-
 const RagChat: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const queryRAG = async (question: string): Promise<RagResponse> => {
+  try {
+    const response = await fetch('http://127.0.0.1:8000/rag', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ question }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    // Handle case where API returns an error field
+    if (data.error) {
+      throw new Error(data.error);
+    }
+
+    return {
+      answer: data.answer,
+      source: data.source,
+      hallucinated: data.hallucinated,
+    };
+  } catch (error) {
+    console.error('Error querying RAG:', error);
+    throw new Error(`Failed to query RAG: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+};
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   const sendMessage = async () => {
     if (!input.trim()) return;
 
-    // Add user message
-    setMessages((prev) => [...prev, { sender: "user", text: input }]);
+    const userMessage = input.trim();
+    setMessages((prev) => [...prev, { sender: "user", text: userMessage }]);
     setLoading(true);
+    setInput("");
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/rag", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const data = await queryRAG(userMessage);
+      
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: "bot",
+          text: data.answer,
+          hallucinated: data.hallucinated,
+          source: data.source,
+          error: false,
         },
-        body: JSON.stringify({ question: input }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        setMessages((prev) => [
-          ...prev,
-          {
-            sender: "bot",
-            text: "Sorry, something went wrong.",
-            hallucinated: true,
-            source: "llm_fallback",
-          },
-        ]);
-      } else {
-        const data: RagResponse = await response.json();
-
-        // Log full response object
-        console.log("RAG response data:", data);
-
-        const answerText = data.answer;
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            sender: "bot",
-            text: answerText,
-            hallucinated: data.hallucinated,
-            source: data.source,
-          },
-        ]);
-      }
+      ]);
     } catch (error: any) {
       setMessages((prev) => [
         ...prev,
-        { sender: "bot", text: `Network error: ${error.message}` },
+        { 
+          sender: "bot", 
+          text: `Error: ${error.message}`,
+          error: true,
+        },
       ]);
     }
 
     setLoading(false);
-    setInput("");
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -82,11 +101,14 @@ const RagChat: React.FC = () => {
     }
   };
 
-  return (
-    <div className="flex flex-col bg-white dark:bg-zinc-900">
-      <div className="mb-4 space-y-3 px-2">
+return (
+    <div className="flex flex-col h-96">
+      <div className="flex-1 overflow-y-auto mb-4 space-y-3 px-2 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
         {messages.length === 0 && (
-          <p className="text-zinc-500 text-center py-8">Ask me anything about the page!</p>
+          <div className="text-center py-12">
+            <div className="text-gray-400 text-lg mb-2">💬</div>
+            <p className="text-gray-500 dark:text-gray-400">Ask me anything about the saved pages!</p>
+          </div>
         )}
         {messages.map((msg, idx) => (
           <div
@@ -94,56 +116,75 @@ const RagChat: React.FC = () => {
             className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
-              className={`max-w-[80%] px-4 py-2 rounded-lg ${
+              className={`max-w-[80%] px-4 py-3 rounded-2xl shadow-sm ${
                 msg.sender === "user"
-                  ? "bg-blue-600 text-white"
-                  : "bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100"
+                  ? "bg-blue-500 text-white rounded-br-md"
+                  : msg.error
+                  ? "bg-red-100 dark:bg-red-900/30 text-red-900 dark:text-red-100 rounded-bl-md border border-red-200 dark:border-red-800"
+                  : "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-bl-md"
               }`}
             >
-              <div>{msg.text}</div>
+              <div className="whitespace-pre-wrap">{msg.text}</div>
 
-              {/* Show hallucination warning */}
-              {msg.hallucinated && (
-                <div className="mt-2 text-xs text-yellow-800 bg-yellow-100 dark:bg-yellow-700 dark:text-yellow-200 p-1 rounded">
+              {msg.hallucinated && !msg.error && (
+                <div className="mt-2 text-xs text-amber-800 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-200 p-2 rounded-lg border border-amber-200 dark:border-amber-800">
                   ⚠️ This answer is a fallback and may not be accurate.
                 </div>
               )}
 
-              {/* Show source info */}
-              {msg.source && (
-                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Source: {msg.source}
+              {msg.source && !msg.error && (
+                <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 opacity-70">
+                  Source: {msg.source.replace(/_/g, ' ')}
                 </div>
               )}
             </div>
           </div>
         ))}
+        {loading && (
+          <div className="flex justify-start">
+            <div className="bg-gray-100 dark:bg-gray-800 px-4 py-3 rounded-2xl rounded-bl-md">
+              <div className="flex items-center space-x-2">
+                <div className="animate-pulse flex space-x-1">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                </div>
+                <span className="text-sm text-gray-500">Thinking...</span>
+              </div>
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
       </div>
 
-      <div className="border-t border-gray-200 dark:border-zinc-700 pt-4">
-        <textarea
-          rows={2}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Type your question and press Enter"
-          className="w-full border border-gray-300 dark:border-zinc-700 rounded-md p-2 resize-none dark:bg-zinc-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          disabled={loading}
-        />
-        <button
-          onClick={sendMessage}
-          disabled={loading || !input.trim()}
-          className={`mt-2 w-full py-2 rounded-md text-white ${
-            loading || !input.trim()
-              ? "bg-blue-300 cursor-not-allowed"
-              : "bg-blue-600 hover:bg-blue-700"
-          }`}
-        >
-          {loading ? "Thinking..." : "Send"}
-        </button>
+      <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+        <div className="relative">
+          <textarea
+            rows={2}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Type your question and press Enter"
+            className="w-full border border-gray-300 dark:border-gray-600 rounded-xl p-3 pr-12 resize-none bg-white dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+            disabled={loading}
+          />
+          <button
+            onClick={sendMessage}
+            disabled={loading || !input.trim()}
+            className={`absolute right-2 top-2 p-2 rounded-lg transition-all ${
+              loading || !input.trim()
+                ? "text-gray-400 cursor-not-allowed"
+                : "text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+            }`}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
   );
-};
+}; 
 
 export default RagChat;

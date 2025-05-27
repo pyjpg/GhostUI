@@ -1,242 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
-
-type ScrapedMemory = {
-  title: string;
-  bodyText: string;
-  links: string[];
-  url: string;
-  timestamp: number;
-};
-
-type Message = {
-  sender: "user" | "bot";
-  text: string;
-  hallucinated?: boolean;
-  source?: string;
-  error?: boolean;
-};
-
-type RagResponse = {
-  answer: string;
-  source: string;
-  hallucinated: boolean;
-  error?: string;
-};
-
-// Mock scrape function for demo - in real app this would scrape the actual page
-const scrapePage = () => ({
-  title: "Current Page Demo",
-  bodyText: "This is a demo of scraped content from the current page. In a real implementation, this would contain the actual page content extracted from the DOM. This could include article content, documentation text, or any other textual information available on the page.",
-  links: ["https://example.com", "https://docs.example.com", "https://help.example.com"],
-  url: window.location.href || "https://current-page.com/demo",
-  timestamp: Date.now()
-});
-
-// Real API functions
-const saveMemoryToAPI = async (memoryData: ScrapedMemory): Promise<{ status: string; message: string }> => {
-  try {
-    const response = await fetch('http://127.0.0.1:8000/memory/save', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(memoryData),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('Error saving memory:', error);
-    throw new Error(`Failed to save memory: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
-};
-
-const queryRAG = async (question: string): Promise<RagResponse> => {
-  try {
-    const response = await fetch('http://127.0.0.1:8000/rag', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ question }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    
-    // Handle case where API returns an error field
-    if (data.error) {
-      throw new Error(data.error);
-    }
-
-    return {
-      answer: data.answer,
-      source: data.source,
-      hallucinated: data.hallucinated,
-    };
-  } catch (error) {
-    console.error('Error querying RAG:', error);
-    throw new Error(`Failed to query RAG: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
-};
-
-const RagChat: React.FC = () => {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  const sendMessage = async () => {
-    if (!input.trim()) return;
-
-    const userMessage = input.trim();
-    setMessages((prev) => [...prev, { sender: "user", text: userMessage }]);
-    setLoading(true);
-    setInput("");
-
-    try {
-      const data = await queryRAG(userMessage);
-      
-      setMessages((prev) => [
-        ...prev,
-        {
-          sender: "bot",
-          text: data.answer,
-          hallucinated: data.hallucinated,
-          source: data.source,
-          error: false,
-        },
-      ]);
-    } catch (error: any) {
-      setMessages((prev) => [
-        ...prev,
-        { 
-          sender: "bot", 
-          text: `Error: ${error.message}`,
-          error: true,
-        },
-      ]);
-    }
-
-    setLoading(false);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  };
-
-  return (
-    <div className="flex flex-col h-96">
-      <div className="flex-1 overflow-y-auto mb-4 space-y-3 px-2 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
-        {messages.length === 0 && (
-          <div className="text-center py-12">
-            <div className="text-gray-400 text-lg mb-2">💬</div>
-            <p className="text-gray-500 dark:text-gray-400">Ask me anything about the saved pages!</p>
-          </div>
-        )}
-        {messages.map((msg, idx) => (
-          <div
-            key={idx}
-            className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
-          >
-            <div
-              className={`max-w-[80%] px-4 py-3 rounded-2xl shadow-sm ${
-                msg.sender === "user"
-                  ? "bg-blue-500 text-white rounded-br-md"
-                  : msg.error
-                  ? "bg-red-100 dark:bg-red-900/30 text-red-900 dark:text-red-100 rounded-bl-md border border-red-200 dark:border-red-800"
-                  : "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-bl-md"
-              }`}
-            >
-              <div className="whitespace-pre-wrap">{msg.text}</div>
-
-              {msg.hallucinated && !msg.error && (
-                <div className="mt-2 text-xs text-amber-800 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-200 p-2 rounded-lg border border-amber-200 dark:border-amber-800">
-                  ⚠️ This answer is a fallback and may not be accurate.
-                </div>
-              )}
-
-              {msg.source && !msg.error && (
-                <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 opacity-70">
-                  Source: {msg.source.replace(/_/g, ' ')}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-        {loading && (
-          <div className="flex justify-start">
-            <div className="bg-gray-100 dark:bg-gray-800 px-4 py-3 rounded-2xl rounded-bl-md">
-              <div className="flex items-center space-x-2">
-                <div className="animate-pulse flex space-x-1">
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                </div>
-                <span className="text-sm text-gray-500">Thinking...</span>
-              </div>
-            </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-        <div className="relative">
-          <textarea
-            rows={2}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type your question and press Enter"
-            className="w-full border border-gray-300 dark:border-gray-600 rounded-xl p-3 pr-12 resize-none bg-white dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-            disabled={loading}
-          />
-          <button
-            onClick={sendMessage}
-            disabled={loading || !input.trim()}
-            className={`absolute right-2 top-2 p-2 rounded-lg transition-all ${
-              loading || !input.trim()
-                ? "text-gray-400 cursor-not-allowed"
-                : "text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-            }`}
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-            </svg>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
+import RagChat from "./RagChat";
+import MemorySaver from "./MemorySaver";
 
 const CommandPalette: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(2);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [query, setQuery] = useState("");
-  const [scrapedPreview, setScrapedPreview] = useState<ScrapedMemory | null>(null);
-  const [savedMemories, setSavedMemories] = useState<ScrapedMemory[]>([]);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
-  const [saveMessage, setSaveMessage] = useState('');
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
@@ -253,11 +23,8 @@ const CommandPalette: React.FC = () => {
     "Explain this code pattern"
   ];
 
-  const memoryItems = savedMemories.map((mem) => 
-    `🧠 ${mem.title} (${new URL(mem.url).hostname})`
-  );
   
-  const items = activeTab === 0 ? memoryItems : askItems;
+  const items = activeTab === 0 ? askItems : askItems;
 
   // Handle keyboard shortcuts
   useEffect(() => {
@@ -364,13 +131,7 @@ const CommandPalette: React.FC = () => {
     }
   }, [isDragging, dragStart]);
 
-  // Scrape current page when Memory tab opens
-  useEffect(() => {
-    if (isOpen && activeTab === 0) {
-      const scraped = scrapePage();
-      setScrapedPreview(scraped);
-    }
-  }, [isOpen, activeTab]);
+ 
 
   // Focus input when opening
   useEffect(() => {
@@ -379,43 +140,7 @@ const CommandPalette: React.FC = () => {
     }
   }, [isOpen, activeTab]);
 
-  const handleSaveMemory = async () => {
-    if (!scrapedPreview) return;
-
-    // Check if already saved
-    if (savedMemories.some((mem) => mem.url === scrapedPreview.url)) {
-      setSaveStatus('error');
-      setSaveMessage('This page is already saved in memory');
-      setTimeout(() => setSaveStatus('idle'), 3000);
-      return;
-    }
-
-    setSaveStatus('saving');
-    setSaveMessage('');
-
-    try {
-      const result = await saveMemoryToAPI(scrapedPreview);
-      
-      if (result.status === 'success') {
-        setSavedMemories((prev) => [...prev, scrapedPreview]);
-        setSaveStatus('success');
-        setSaveMessage(result.message);
-        console.log("✅ Saved new memory:", scrapedPreview.title);
-      } else {
-        throw new Error(result.message || 'Unknown error occurred');
-      }
-    } catch (error: any) {
-      setSaveStatus('error');
-      setSaveMessage(error.message);
-      console.error("❌ Failed to save memory:", error);
-    }
-
-    // Reset status after 3 seconds
-    setTimeout(() => {
-      setSaveStatus('idle');
-      setSaveMessage('');
-    }, 3000);
-  };
+  
 
   const handleTabClick = (index: number) => {
     setActiveTab(index);
@@ -554,129 +279,7 @@ const CommandPalette: React.FC = () => {
                 </div>
 
                 {/* Memory Tab - Save Button and Preview */}
-                {activeTab === 0 && (
-                  <div className="mb-6 space-y-4">
-                    {/* Page Preview */}
-                    {scrapedPreview && (
-                      <div className="bg-gray-50/30 dark:bg-gray-800/20 backdrop-blur-sm border border-gray-200/30 dark:border-gray-700/30 rounded-xl p-4">
-                        <div className="flex items-start space-x-3">
-                          <div className="w-12 h-12 bg-blue-100/60 dark:bg-blue-900/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                            <svg className="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <h3 className="font-medium text-gray-900 dark:text-white truncate">
-                              {scrapedPreview.title}
-                            </h3>
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 line-clamp-3">
-                              {scrapedPreview.bodyText}
-                            </p>
-                            <div className="flex items-center mt-2 text-xs text-gray-500 dark:text-gray-500">
-                              <span className="truncate">{new URL(scrapedPreview.url).hostname}</span>
-                              <span className="mx-2">•</span>
-                              <span>{scrapedPreview.links.length} links found</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    
-                    <button
-                      onClick={handleSaveMemory}
-                      disabled={saveStatus === 'saving'}
-                      className={`w-full px-4 py-3 rounded-xl transition-all font-medium flex items-center justify-center space-x-2 border ${
-                        saveStatus === 'saving'
-                          ? "bg-gray-400/60 text-white cursor-not-allowed border-gray-300/20"
-                          : saveStatus === 'success'
-                          ? "bg-green-500/70 text-white border-green-400/20"
-                          : saveStatus === 'error'
-                          ? "bg-red-500/70 text-white border-red-400/20"
-                          : "bg-blue-500/70 backdrop-blur-sm text-white hover:bg-blue-600/70 border-blue-400/20"
-                      }`}
-                    >
-                      {saveStatus === 'saving' ? (
-                        <>
-                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                          <span>Saving...</span>
-                        </>
-                      ) : saveStatus === 'success' ? (
-                        <>
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                          </svg>
-                          <span>Saved Successfully!</span>
-                        </>
-                      ) : saveStatus === 'error' ? (
-                        <>
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          <span>Error Saving</span>
-                        </>
-                      ) : (
-                        <>
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z" />
-                          </svg>
-                          <span>Save This Page to Memory</span>
-                        </>
-                      )}
-                    </button>
-
-                    {/* Save Status Message */}
-                    {saveMessage && (
-                      <div className={`text-sm p-3 rounded-lg ${
-                        saveStatus === 'success' 
-                          ? 'bg-green-100/60 dark:bg-green-900/20 text-green-800 dark:text-green-200 border border-green-200/30 dark:border-green-800/30'
-                          : 'bg-red-100/60 dark:bg-red-900/20 text-red-800 dark:text-red-200 border border-red-200/30 dark:border-red-800/30'
-                      }`}>
-                        {saveMessage}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Items List */}
-                <div className="space-y-2 max-h-80 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
-                  {items.length === 0 ? (
-                    <div className="text-center py-12">
-                      <div className="text-gray-400 text-2xl mb-2">
-                        {activeTab === 0 ? "🧠" : "🔍"}
-                      </div>
-                      <p className="text-gray-500 dark:text-gray-400">
-                        {activeTab === 0 ? "No saved memories yet." : "No items to show."}
-                      </p>
-                    </div>
-                  ) : (
-                    items.map((item, index) => (
-                      <button
-                        key={index}
-                        className={`w-full text-left px-4 py-3 rounded-xl cursor-pointer transition-all ${
-                          index === highlightedIndex
-                            ? "bg-blue-50/50 dark:bg-blue-900/15 backdrop-blur-sm border-2 border-blue-200/40 dark:border-blue-700/40"
-                            : "bg-gray-50/30 dark:bg-gray-800/20 backdrop-blur-sm hover:bg-gray-100/40 dark:hover:bg-gray-700/30 border-2 border-transparent"
-                        }`}
-                      >
-                        <div className="flex items-center space-x-3">
-                          <div className="text-lg">
-                            {item.startsWith('🧠') ? '🧠' : '🔍'}
-                          </div>
-                          <div className="flex-1">
-                            <div className="text-gray-900 dark:text-gray-100 font-medium">
-                              {item.replace(/^🧠\s/, '')}
-                            </div>
-                            {activeTab === 0 && (
-                              <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                                Saved recently
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </button>
-                    ))
-                  )}
-                </div>
+                {activeTab === 0 && <MemorySaver />}
               </>
             )}
           </div>
