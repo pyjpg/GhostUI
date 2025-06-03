@@ -5,6 +5,7 @@ type RagResponse = {
   answer: string;
   source: string;
   hallucinated: boolean;
+  session_id: string; // Added session_id to response type
   error?: string;
 };
 
@@ -20,7 +21,10 @@ const RagChat: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  // Added session_id state - generates a unique ID for this chat session
+  const [sessionId] = useState(() => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const queryRAG = async (question: string): Promise<RagResponse> => {
     try {
@@ -29,7 +33,10 @@ const RagChat: React.FC = () => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ 
+          question,
+          session_id: sessionId // Added session_id to the request body
+        }),
       });
 
       if (!response.ok) {
@@ -46,6 +53,7 @@ const RagChat: React.FC = () => {
         answer: data.answer,
         source: data.source,
         hallucinated: data.hallucinated,
+        session_id: data.session_id, // Include session_id in return
       };
     } catch (error) {
       console.error("Error querying RAG:", error);
@@ -64,6 +72,32 @@ const RagChat: React.FC = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Log the session ID when component mounts for debugging
+  useEffect(() => {
+    console.log("Chat session ID:", sessionId);
+  }, [sessionId]);
+
+  // Prevent parent keyboard shortcuts when textarea is focused
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isTextareaFocused = document.activeElement === textareaRef.current;
+      
+      if (isTextareaFocused) {
+        // Stop propagation for number keys 1-3 to prevent tab switching
+        if (e.key >= "1" && e.key <= "3") {
+          e.stopPropagation();
+        }
+        // Stop propagation for arrow keys to prevent parent navigation
+        if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key) && !e.ctrlKey) {
+          e.stopPropagation();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true); // Use capture phase
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, []);
 
   const sendMessage = async () => {
     if (!input.trim()) return;
@@ -107,8 +141,33 @@ const RagChat: React.FC = () => {
     }
   };
 
+  // Optional: Add a function to clear session history
+  const clearSession = async () => {
+    try {
+      await fetch(`http://127.0.0.1:8000/session/${sessionId}`, {
+        method: "DELETE",
+      });
+      setMessages([]);
+      console.log("Session cleared:", sessionId);
+    } catch (error) {
+      console.error("Error clearing session:", error);
+    }
+  };
+
   return (
     <div className="flex flex-col max-h-[calc(100vh-100px)] h-full">
+      {/* Optional: Add a header showing session info and clear button */}
+      <div className="flex justify-between items-center mb-2 px-2 text-xs text-gray-500">
+        <span>Session: {sessionId}</span>
+        <button 
+          onClick={clearSession}
+          className="hover:text-red-500 transition-colors"
+          title="Clear conversation history"
+        >
+          Clear History
+        </button>
+      </div>
+
       <div className="flex-1 overflow-y-auto mb-4 space-y-3 px-2 pb-24 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
         {messages.length === 0 && (
           <div className="text-center py-12">
@@ -195,6 +254,7 @@ const RagChat: React.FC = () => {
       <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
         <div className="relative">
           <textarea
+            ref={textareaRef}
             rows={2}
             value={input}
             onChange={(e) => setInput(e.target.value)}

@@ -38,57 +38,39 @@ const MemorySaver: React.FC = () => {
   const [scrapedPreview, setScrapedPreview] = useState<ScrapedMemory | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [saveMessage, setSaveMessage] = useState("");
-  const [savedItems, setSavedItems] = useState<string[]>([]);
-  const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
+  const [savedItems, setSavedItems] = useState<ScrapedMemory[]>([]);
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
 
   useEffect(() => {
     const scraped = scrapePage();
     setScrapedPreview(scraped);
   }, []);
 
- const handleSave = async () => {
-  if (!scrapedPreview) return;
-  setSaveStatus("saving");
-  try {
-    const res = await saveMemoryToAPI(scrapedPreview);
-    const success = res.status === "success";
-    setSaveStatus(success ? "success" : "error");
-    setSaveMessage(res.message);
+  const handleSave = async () => {
+    if (!scrapedPreview) return;
+    setSaveStatus("saving");
+    try {
+      const res = await saveMemoryToAPI(scrapedPreview);
+      const success = res.status === "success";
+      setSaveStatus(success ? "success" : "error");
+      setSaveMessage(res.message);
 
-    if (success) {
-      setSavedItems((prev) => {
-        const newTitle = `🧠 ${scrapedPreview.title}`;
-        // Check if the title is already saved
-        if (prev.includes(newTitle)) {
-          return prev; // no duplicates, return unchanged
-        }
-        return [newTitle, ...prev]; // add new item at the front
-      });
+      if (success) {
+        setSavedItems((prev) => {
+          if (prev.some((item) => item.url === scrapedPreview.url)) return prev;
+          return [scrapedPreview, ...prev];
+        });
+      }
+    } catch (err: any) {
+      setSaveStatus("error");
+      setSaveMessage(err.message);
+    } finally {
+      setTimeout(() => setSaveStatus("idle"), 3000);
     }
-  } catch (err: any) {
-    setSaveStatus("error");
-    setSaveMessage(err.message);
-  } finally {
-    setTimeout(() => setSaveStatus("idle"), 3000);
-  }
-};
- 
+  };
 
   return (
     <div className="space-y-6">
-      {/* Preview */}
-      {scrapedPreview && (
-        <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-300 dark:border-gray-700">
-          <h3 className="font-semibold text-lg">{scrapedPreview.title}</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-3">
-            {scrapedPreview.bodyText}
-          </p>
-          <div className="text-xs text-gray-500 mt-1">
-            {new URL(scrapedPreview.url).hostname} • {scrapedPreview.links.length} links
-          </div>
-        </div>
-      )}
-
       {/* Save Button */}
       <button
         onClick={handleSave}
@@ -114,36 +96,86 @@ const MemorySaver: React.FC = () => {
       {saveMessage && <p className="text-xs text-gray-500">{saveMessage}</p>}
 
       {/* Saved Items List */}
-      <div className="space-y-2 max-h-80 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
+      <div className="space-y-2 max-h-96 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
         {savedItems.length === 0 ? (
           <div className="text-center py-12">
             <div className="text-gray-400 text-2xl mb-2">🧠</div>
             <p className="text-gray-500 dark:text-gray-400">No saved memories yet.</p>
           </div>
         ) : (
-          savedItems.map((item, index) => (
-            <button
-              key={index}
-              className={`w-full text-left px-4 py-3 rounded-xl cursor-pointer transition-all ${
-                index === highlightedIndex
-                  ? "bg-blue-50/50 dark:bg-blue-900/15 backdrop-blur-sm border-2 border-blue-200/40 dark:border-blue-700/40"
-                  : "bg-gray-50/30 dark:bg-gray-800/20 backdrop-blur-sm hover:bg-gray-100/40 dark:hover:bg-gray-700/30 border-2 border-transparent"
-              }`}
-              onClick={() => setHighlightedIndex(index)}
-            >
-              <div className="flex items-center space-x-3">
-                <div className="text-lg">🧠</div>
-                <div className="flex-1">
-                  <div className="text-gray-900 dark:text-gray-100 font-medium">
-                    {item.replace(/^🧠\s/, "")}
-                  </div>
-                  <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Saved recently
+          savedItems.map((item, index) => {
+            const isExpanded = index === expandedIndex;
+            return (
+              <div
+                key={index}
+                className={`w-full text-left px-4 py-3 rounded-xl transition-all space-y-2 cursor-pointer ${
+                  isExpanded
+                    ? "bg-blue-50/50 dark:bg-blue-900/15 border-2 border-blue-200/40 dark:border-blue-700/40"
+                    : "bg-gray-50/30 dark:bg-gray-800/20 hover:bg-gray-100/40 dark:hover:bg-gray-700/30 border-2 border-transparent"
+                }`}
+                onClick={() =>
+                  setExpandedIndex(isExpanded ? null : index)
+                }
+              >
+                <div className="flex items-center space-x-3">
+                  <div className="text-lg">🧠</div>
+                  <div className="flex-1">
+                    <div className="text-gray-900 dark:text-gray-100 font-medium">
+                      {item.title}
+                    </div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      {new Date(item.timestamp).toLocaleTimeString()}
+                    </div>
                   </div>
                 </div>
+
+                {/* Expandable Detail */}
+                {isExpanded && (
+                  <div className="mt-3 space-y-2 text-sm text-gray-700 dark:text-gray-300">
+                    <p>{item.bodyText}</p>
+
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      <strong>URL:</strong>{" "}
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        className="text-blue-600 hover:underline"
+                      >
+                        {item.url}
+                      </a>
+                    </div>
+
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      <strong>Captured:</strong>{" "}
+                      {new Date(item.timestamp).toLocaleString()}
+                    </div>
+
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      <strong>Top Links ({item.links.length}):</strong>
+                      <ul className="list-disc list-inside space-y-1 mt-1">
+                        {item.links.slice(0, 3).map((link, i) => (
+                          <li key={i} className="truncate">
+                            <a
+                              href={link}
+                              target="_blank"
+                              className="text-blue-500 hover:underline"
+                            >
+                              {link}
+                            </a>
+                          </li>
+                        ))}
+                        {item.links.length > 3 && (
+                          <li className="italic text-gray-400">
+                            +{item.links.length - 3} more
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  </div>
+                )}
               </div>
-            </button>
-          ))
+            );
+          })
         )}
       </div>
     </div>

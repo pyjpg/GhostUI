@@ -1,14 +1,21 @@
-import CommandPalette from "./components/CommandPalette";
+import { Routes, Route } from 'react-router-dom';
+import Navbar from './components/Navbar';
+import CommandPalette from './components/CommandPalette';
+import MemorySaver from './components/MemorySaver';
+import DocumentPage from './pages/DocumentPage';
 
 function App() {
   return (
-    <div className="h-screen w-screen bg-gray-100 dark:bg-zinc-950 transition-colors">
+    <div className="min-h-screen bg-gray-50 dark:bg-zinc-950 transition-colors">
       <CommandPalette />
-      <div className="flex items-center justify-center h-full">
-        <h1 className="text-3xl font-bold text-zinc-900 dark:text-white">
-          Ghost UI Running
-        </h1>
-      </div>
+      <MemorySaver />
+      <Navbar title="Memory Testing Platform" />
+
+      <main>
+        <Routes>
+          <Route path="/docs/:docId" element={<DocumentPage />} />
+        </Routes>
+      </main>
     </div>
   );
 }

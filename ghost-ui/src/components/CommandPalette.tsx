@@ -44,8 +44,11 @@ const CommandPalette: React.FC = () => {
       
       if (!isOpen) return;
 
-      // Tab switching with numbers 1-3
-      if (e.key >= "1" && e.key <= "3") {
+      // Check if input is focused - if so, don't handle tab switching with numbers
+      const isInputFocused = document.activeElement === inputRef.current;
+
+      // Tab switching with numbers 1-3 (only when input is NOT focused)
+      if (!isInputFocused && e.key >= "1" && e.key <= "3") {
         e.preventDefault();
         const tabIndex = parseInt(e.key) - 1;
         setActiveTab(tabIndex);
@@ -79,8 +82,8 @@ const CommandPalette: React.FC = () => {
         }
       }
 
-      // Tab navigation (only when not in Chat tab)
-      if (activeTab !== 2) {
+      // Tab navigation (only when not in Chat tab and input is NOT focused)
+      if (activeTab !== 2 && !isInputFocused) {
         if (e.key === "ArrowDown" && items.length > 0) {
           e.preventDefault();
           setHighlightedIndex((prev) => (prev + 1) % items.length);
