@@ -5,6 +5,7 @@ import MemorySaver from './components/MemorySaver';
 import DocumentPage from './pages/DocumentPage';
 import { PDFViewer } from '@react-pdf/renderer';
 import PDFDoc from './components/pdf';
+import DocumentList from './components/DocumentList';
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
 
       <main>
         <Routes>
+          <Route path="/" element={<DocumentList/>} />
           <Route path="/docs/:docId" element={<DocumentPage />} />
         </Routes>
       </main>

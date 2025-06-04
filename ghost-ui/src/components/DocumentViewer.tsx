@@ -48,7 +48,7 @@ const DocumentViewer: FC<Props> = ({ document, onClose }) => {
             }
           ]
         };
-      case 'research-paper':
+      case 'ElecSafeP':
         return {
           title: 'Advances in Neural Network Architectures for NLP',
           sections: [
