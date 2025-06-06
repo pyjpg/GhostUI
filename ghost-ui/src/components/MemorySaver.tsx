@@ -1,7 +1,7 @@
 import "../pdfjsWorker"; 
 import React, { useEffect, useState, useRef } from "react";
+import pdfToText from "react-pdftotext";
 
-import * as pdfjsLib from 'pdfjs-dist';
 
 
 type ScrapedMemory = {
@@ -11,68 +11,45 @@ type ScrapedMemory = {
   url: string;
   timestamp: number;
   type: 'webpage' | 'pdf';
+  pdfUrl?: string;
   pageCount?: number;
 };
+async function extractText(file: File): Promise<string> {
+    try {
+      const text = await pdfToText(file);
+      console.log("Extracted text:", text);
+      return text;
+    } catch (error) {
+      console.error("Error extracting text from PDF:", error);
+      throw new Error("Failed to extract text from PDF");
+    }
+}
 
-const extractPDFText = async (file: File): Promise<{ text: string; pageCount: number }> => {
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  let fullText = '';
 
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    const strings = content.items.map(item => ('str' in item ? item.str : '')).join(' ');
-    fullText += strings + '\n';
+const scrapePage = (): ScrapedMemory => {
+  // Try to find embedded PDF URL in iframe or embed tags or object tags
+  const selectors = ["iframe[src$='.pdf']", "embed[src$='.pdf']", "object[data$='.pdf']"];
+  let pdfUrl: string | null = null;
+  
+  for (const selector of selectors) {
+    const el = document.querySelector(selector) as HTMLElement | null;
+    if (el) {
+      pdfUrl = el.getAttribute('src') || el.getAttribute('data');
+      if (pdfUrl) break;
+    }
   }
 
-  console.log('Extracted PDF Text:', fullText);
-  return { text: fullText, pageCount: pdf.numPages };
-};
-const extractTextFromPDF = async (pdfData: Uint8Array): Promise<string> => {
-  console.log("Extracting text from PDF data...");
-  const pdfString = Array.from(pdfData).map(byte => String.fromCharCode(byte)).join('');
-
-  const textMatches = pdfString.match(/\(([^)]+)\)/g) || [];
-  const streamMatches = pdfString.match(/stream\s*(.*?)\s*endstream/gs) || [];
-
-  console.log(`Found ${textMatches.length} simple text matches and ${streamMatches.length} stream blocks.`);
-
-  let extractedText = '';
-
-  textMatches.forEach(match => {
-    const text = match.substring(1, match.length - 1);
-    if (text.length > 2 && /[a-zA-Z]/.test(text)) {
-      extractedText += text + ' ';
-    }
-  });
-
-  streamMatches.forEach(match => {
-    const streamContent = match.replace(/^stream\s*/, '').replace(/\s*endstream$/, '');
-    const readableText = streamContent.match(/[A-Za-z\s]{3,}/g) || [];
-    extractedText += readableText.join(' ') + ' ';
-  });
-
-  console.log("Final extracted text (first 200 chars):", extractedText.slice(0, 200));
-  return extractedText.trim().slice(0, 2000);
+  return {
+    title: document.title || "Untitled Page",
+    bodyText: document.body.innerText.slice(0, 1000),
+    links: Array.from(document.links).map(link => link.href),
+    url: window.location.href,
+    timestamp: Date.now(),
+    type: pdfUrl ? 'pdf' : 'webpage',
+    ...(pdfUrl ? { pdfUrl } : {}),
+  };
 };
 
-const countPDFPages = (pdfData: Uint8Array): number => {
-  console.log("Counting pages in PDF...");
-  const pdfString = Array.from(pdfData).map(byte => String.fromCharCode(byte)).join('');
-  const pageMatches = pdfString.match(/\/Type\s*\/Page[^s]/g);
-  console.log("Page matches found:", pageMatches);
-  return pageMatches ? pageMatches.length : 1;
-};
-
-const scrapePage = (): ScrapedMemory => ({
-  title: document.title || "Untitled Page",
-  bodyText: document.body.innerText.slice(0, 1000),
-  links: Array.from(document.links).map((link) => link.href),
-  url: window.location.href,
-  timestamp: Date.now(),
-  type: 'webpage'
-});
 
 const saveMemoryToAPI = async (
   memoryData: ScrapedMemory
@@ -97,36 +74,59 @@ useEffect(() => {
 }, []);
 
 
-  const handleSave = async () => {
+const handleSave = async () => {
   if (!scrapedPreview) return;
-  console.log("Attempting to save memory:", scrapedPreview);
   setSaveStatus("saving");
 
   try {
-    const res = await saveMemoryToAPI(scrapedPreview);
-    console.log("Save result:", res);
+    let finalPreview = scrapedPreview;
+    console.log("Saving memory:", scrapedPreview);
+    if (scrapedPreview.type === "pdf" && scrapedPreview.pdfUrl) {
+      // Fetch the real PDF file URL found inside the viewer page
+      const response = await fetch(scrapedPreview.pdfUrl);
+      if (!response.ok) throw new Error(`Failed to fetch PDF: ${response.statusText}`);
+      console.log("Fetched PDF from URL:", scrapedPreview.pdfUrl);
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("pdf")) {
+        throw new Error(`PDF URL does not point to a PDF file, content-type: ${contentType}`);
+      }
+      console.log("PDF content-type is valid:", contentType);
+      const blob = await response.blob();
+      const file = new File([blob], "document.pdf", { type: "application/pdf" });
 
-    const success = res.status === "success";
-    setSaveStatus(success ? "success" : "error");
+      const extractedText = await extractText(file);
+      console.log("Extracted text from PDF:", extractedText.slice(0, 300));
+      finalPreview = {
+        ...scrapedPreview,
+        bodyText: extractedText || "Could not extract readable text from PDF",
+      };
+
+    } else if (scrapedPreview.type === "webpage") {
+      // Just save webpage as is
+      finalPreview = scrapedPreview;
+    }
+
+    const res = await saveMemoryToAPI(finalPreview);
+    setSaveStatus(res.status === "success" ? "success" : "error");
     setSaveMessage(res.message);
 
-    if (success) {
+    if (res.status === "success") {
       setSavedItems((prev) => {
         const alreadyExists = prev.some(
-          (item) => item.url === scrapedPreview.url && item.timestamp === scrapedPreview.timestamp
+          (item) => item.url === finalPreview.url && item.timestamp === finalPreview.timestamp
         );
-        console.log("Already saved?", alreadyExists);
-        return alreadyExists ? prev : [scrapedPreview, ...prev];
+        return alreadyExists ? prev : [finalPreview, ...prev];
       });
     }
-  } catch (err: any) {
-    console.error("Error saving memory:", err);
+  } catch (error: any) {
+    console.error("Error saving memory:", error);
     setSaveStatus("error");
-    setSaveMessage(err.message);
+    setSaveMessage(error.message);
   } finally {
     setTimeout(() => setSaveStatus("idle"), 3000);
   }
 };
+
 
 const handlePDFUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
   const file = event.target.files?.[0];
@@ -139,8 +139,8 @@ const handlePDFUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
   setSaveStatus("saving");
   setSaveMessage("Extracting text from PDF...");
   try {
-    const { text, pageCount } = await extractPDFText(file);
-    console.log('[Extracted]', { textSnippet: text.slice(0, 300), pageCount });
+    const text = await extractText(file);
+    console.log('[Extracted]', { textSnippet: text.slice(0, 300) });
 
     const pdfMemory: ScrapedMemory = {
       title: file.name.replace('.pdf', ''),
@@ -149,12 +149,10 @@ const handlePDFUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
       url: `file://${file.name}`,
       timestamp: Date.now(),
       type: 'pdf',
-      pageCount
     };
 
     setScrapedPreview(pdfMemory);
     setSaveStatus("success");
-    setSaveMessage(`Extracted text from ${pageCount} page(s)`);
 
     setTimeout(async () => {
       const res = await saveMemoryToAPI(pdfMemory);
