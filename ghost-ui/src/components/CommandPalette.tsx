@@ -283,6 +283,22 @@ const CommandPalette: React.FC = () => {
 
                 {/* Memory Tab - Save Button and Preview */}
                 {activeTab === 0 && <MemorySaver />}
+                {activeTab !== 0 && (
+  <ul className="space-y-2">
+    {items.map((item, index) => (
+      <li
+        key={index}
+        className={`px-4 py-2 rounded cursor-pointer ${
+          index === highlightedIndex
+            ? "bg-blue-500 text-white"
+            : "hover:bg-gray-200 dark:hover:bg-gray-700"
+        }`}
+      >
+        {item}
+      </li>
+    ))}
+  </ul>
+)}
               </>
             )}
           </div>

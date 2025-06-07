@@ -3,8 +3,6 @@ import Navbar from './components/Navbar';
 import CommandPalette from './components/CommandPalette';
 import MemorySaver from './components/MemorySaver';
 import DocumentPage from './pages/DocumentPage';
-import { PDFViewer } from '@react-pdf/renderer';
-import PDFDoc from './components/pdf';
 import DocumentList from './components/DocumentList';
 
 function App() {

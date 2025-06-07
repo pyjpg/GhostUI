@@ -1,4 +1,3 @@
-import "../pdfjsWorker"; 
 import React, { useEffect, useState, useRef } from "react";
 import pdfToText from "react-pdftotext";
 
@@ -52,9 +51,9 @@ const scrapePage = (): ScrapedMemory => {
 
 
 const saveMemoryToAPI = async (
-  memoryData: ScrapedMemory
+  memory: ScrapedMemory
 ): Promise<{ status: string; message: string }> => {
-  // Simulate API call for demo
+  console.log('[API] Saving memory:', memory); // simulate use
   await new Promise(resolve => setTimeout(resolve, 1000));
   return { status: "success", message: "Memory saved successfully!" };
 };
